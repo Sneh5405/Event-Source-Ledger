@@ -1,0 +1,168 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique
+  passwordHash String
+  role         UserRole      @default(USER)
+  status       UserStatus    @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  accounts     Account[]
+  refreshTokens RefreshToken[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  token     String   @unique
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum AccountStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+model Account {
+  id            String             @id @default(uuid()) @db.Uuid
+  userId        String?            @db.Uuid
+  user          User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  accountNumber String             @unique
+  name          String
+  type          AccountType
+  status        AccountStatus      @default(ACTIVE)
+  currency      String             @db.VarChar(3)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  ledgerEntries LedgerEntry[]
+  projection    BalanceProjection?
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@map("accounts")
+}
+
+model BalanceProjection {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @unique @db.Uuid
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  balance   Decimal  @db.Decimal(18, 4) @default(0.0000)
+  version   BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("balance_projections")
+}
+
+enum TransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+}
+
+model Transaction {
+  id             String            @id @default(uuid()) @db.Uuid
+  idempotencyKey String?           @unique
+  description    String
+  status         TransactionStatus @default(POSTED)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  ledgerEntries  LedgerEntry[]
+
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+model LedgerEntry {
+  id            String      @id @default(uuid()) @db.Uuid
+  transactionId String      @db.Uuid
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  accountId     String      @db.Uuid
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  type          EntryType
+  amount        Decimal     @db.Decimal(18, 4)
+  createdAt     DateTime    @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([transactionId])
+  @@map("ledger_entries")
+}
+
+enum IdempotencyStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model IdempotencyKey {
+  id           String            @id @default(uuid()) @db.Uuid
+  key          String            @unique
+  requestHash  String
+  responseCode Int?
+  responseBody String? // JSON string representation of the response data
+  status       IdempotencyStatus @default(PENDING)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([key])
+  @@map("idempotency_keys")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  details   Json
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
